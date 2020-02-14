@@ -10,7 +10,7 @@ from rango.forms import UserForm, UserProfileForm
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth import logout
-
+from datetime import datetime
 
 
 def index(request):
@@ -22,8 +22,11 @@ def index(request):
     context_dict['categories'] = category_list
     context_dict['pages'] = page_list
 
+    visitor_cookie_handler(request)
 
-    return render(request, 'rango/index.html', context=context_dict)
+
+    response = render(request, 'rango/index.html', context=context_dict)
+    return response
 
 
 def about(request):
@@ -31,8 +34,13 @@ def about(request):
     print(request.method)
     # prints out the user name, if no one is logged in it prints `AnonymousUser`
     print(request.user)
-    return render(request, 'rango/about.html', {})
 
+    context_dict = {}
+    visitor_cookie_handler(request)
+    context_dict['visits'] = request.session['visits']
+
+    response = render(request, 'rango/about.html', context=context_dict)
+    return response
 
 
 def show_category(request, category_name_slug):
@@ -50,22 +58,21 @@ def show_category(request, category_name_slug):
 
     return render(request, 'rango/category.html', context=context_dict)
 
+
 @login_required
 def add_category(request):
+    form = CategoryForm()
 
-        form = CategoryForm()
+    if request.method == 'POST':
+        form = CategoryForm(request.POST)
 
-        if request.method == 'POST':
-            form = CategoryForm(request.POST)
+        if form.is_valid():
+            form.save(commit=True)
+            return redirect('/rango/')
+        else:
+            print(form.errors)
 
-            if form.is_valid():
-                form.save(commit=True)
-                return redirect('/rango/')
-            else:
-                print(form.errors)
-
-        return render(request, 'rango/add_category.html', {'form': form})
-
+    return render(request, 'rango/add_category.html', {'form': form})
 
 
 @login_required
@@ -97,6 +104,7 @@ def add_page(request, category_name_slug):
 
     context_dict = {'form': form, 'category': category}
     return render(request, 'rango/add_page.html', context=context_dict)
+
 
 def register(request):
     # A boolean value for telling the template
@@ -134,12 +142,12 @@ def register(request):
             # put it in the UserProfile model.
             if 'picture' in request.FILES:
                 profile.picture = request.FILES['picture']
-              # Now we save the UserProfile model instance.
+            # Now we save the UserProfile model instance.
 
             profile.save()
 
-              # Update our variable to indicate that the template
-              # registration was successful.
+            # Update our variable to indicate that the template
+            # registration was successful.
             registered = True
         else:
             # Invalid form or forms - mistakes or something else?
@@ -153,9 +161,10 @@ def register(request):
         # Render the template depending on the context.
     return render(request,
                   'rango/register.html',
-                  context = {'user_form': user_form,
-                             'profile_form': profile_form,
-                             'registered': registered})
+                  context={'user_form': user_form,
+                           'profile_form': profile_form,
+                           'registered': registered})
+
 
 def user_login(request):
     # If the request is a HTTP POST, try to pull out the relevant information.
@@ -191,16 +200,18 @@ def user_login(request):
             # Bad login details were provided. So we can't log the user in.
             print(f"Invalid login details: {username}, {password}")
             return HttpResponse("Invalid login details supplied.")
-# The request is not a HTTP POST, so display the login form.
-# This scenario would most likely be a HTTP GET.
+    # The request is not a HTTP POST, so display the login form.
+    # This scenario would most likely be a HTTP GET.
     else:
         # No context variables to pass to the template system, hence the
         # blank dictionary object...
         return render(request, 'rango/login.html')
 
+
 @login_required
 def restricted(request):
     return render(request, 'rango/restricted.html')
+
 
 # Use the login_required() decorator to ensure only those logged in can
 # access the view.
@@ -212,4 +223,28 @@ def user_logout(request):
     return redirect(reverse('rango:index'))
 
 
+def visitor_cookie_handler(request):
+    visits = int(get_server_side_cookie(request, 'visits', '1'))
+    last_visit_cookie = get_server_side_cookie(request,
+                                               'last_visit',
+                                               str(datetime.now()))
+    last_visit_time = datetime.strptime(last_visit_cookie[:-7],
+                                        '%Y-%m-%d %H:%M:%S')
+    # If it's been more than a day since the last visit...
+    if (datetime.now() - last_visit_time).days > 0:
+        visits = visits + 1
+        # Update the last visit cookie now that we have updated the count
+        request.session['last_visit'] = str(datetime.now())
+    else:
+        # Set the last visit cookie
+        request.session['last_visit'] = last_visit_cookie
 
+    # Update/set the visits cookie
+    request.session['visits'] = visits
+
+
+def get_server_side_cookie(request, cookie, default_val=None):
+    val = request.session.get(cookie)
+    if not val:
+        val = default_val
+    return val
